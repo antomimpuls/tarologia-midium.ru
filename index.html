@@ -26,7 +26,8 @@ const SITE_SETTINGS = {
   'yandexMetrikaId': '106859706',
   'psychicImageURL': 'https://raw.githubusercontent.com/antomimpuls/gadanie-mega.ru/main/photo.png',
   'workingHours': 'ежедневно 08:00-22:00',
-  'responseTime': '5 минут'
+  'responseTime': '5 минут',
+  'metrikaMessengerVisible': true
 };
 const PSYCHIC_NAME=SITE_SETTINGS.psychicName||'';
 const PHONE_DIGITS=(SITE_SETTINGS.phoneNumber||'').replace(/\D/g,'');
@@ -38,6 +39,301 @@ const TARGET_WA_URL=WA_URL||FALLBACK_WA_URL;
 const TELEGRAM_ENABLED=Number(SITE_SETTINGS.telegramEnabled||0)===1;
 const TELEGRAM_NICKNAME=(SITE_SETTINGS.telegramNickname||'').replace(/^@+/,'');
 const TELEGRAM_URL=TELEGRAM_ENABLED&&TELEGRAM_NICKNAME?`https://t.me/${TELEGRAM_NICKNAME}?text=${ENCODED_MESSAGE}`:'';
+
+const SITE_STATS_TRACKER_CONFIG = {
+    projectUrl: "https://koxvvmvuqaghugedhgyi.supabase.co",
+    anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtveHZ2bXZ1cWFnaHVnZWRoZ3lpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMTI3NzQsImV4cCI6MjA4ODg4ODc3NH0.zgeaqJqADZyJmdeUG8CtZdL4biHL9PuDUXvbqGFyPJs",
+    domain: "tarologia-midium.ru",
+    relayBotUsername: 'secretar_pro_bot'
+};
+
+/* ADSPOWER_SITE_STATS_TRACKER_START */
+(function(){
+    const METRIKA_MESSENGER_VISIBLE = SITE_SETTINGS.metrikaMessengerVisible !== false;
+    const STORAGE_KEYS = {
+        visitor: 'adspower_site_stats_visitor',
+        session: 'adspower_site_stats_session',
+        pendingClicks: 'adspower_site_stats_pending_clicks'
+    };
+    const PAGE_LOAD_TS = Date.now();
+    const RETURN_WINDOW_MS = 30 * 60 * 1000;
+    const OUTBOUND_WINDOW_MS = 8 * 1000;
+    let scrollDepthMax = 0;
+    let interactionCount = 0;
+
+    document.addEventListener('scroll', function(){
+        try {
+            const h = Math.max(document.body.scrollHeight || 0, document.documentElement.scrollHeight || 0);
+            const sd = h > 0 ? Math.min(100, Math.round(((window.scrollY || 0) + (window.innerHeight || 0)) / h * 100)) : 0;
+            if (sd > scrollDepthMax) scrollDepthMax = sd;
+        } catch (err) {}
+    }, {passive: true});
+    ['mousemove', 'touchstart', 'keydown', 'click'].forEach(function(evt){
+        document.addEventListener(evt, function(){ interactionCount++; }, {passive: true, capture: true});
+    });
+
+    function getStorageValue(key){
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw) return raw;
+        } catch (err) {}
+        return null;
+    }
+
+    function setStorageValue(key, value){
+        try {
+            localStorage.setItem(key, value);
+        } catch (err) {}
+    }
+
+    function createId(){
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            return window.crypto.randomUUID();
+        }
+        return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+    }
+
+    function getVisitorKey(){
+        const cached = getStorageValue(STORAGE_KEYS.visitor);
+        if (cached) return cached;
+        const created = createId();
+        setStorageValue(STORAGE_KEYS.visitor, created);
+        return created;
+    }
+
+    function getSessionKey(){
+        const cacheKey = `${STORAGE_KEYS.session}:${new Date().toISOString().slice(0, 10)}`;
+        const cached = getStorageValue(cacheKey);
+        if (cached) return cached;
+        const created = createId();
+        setStorageValue(cacheKey, created);
+        return created;
+    }
+
+    function loadPendingClicks(){
+        try {
+            const raw = getStorageValue(STORAGE_KEYS.pendingClicks);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return [];
+            const now = Date.now();
+            return parsed.filter(function(p){ return p && p.eventToken && p.savedAt && (now - p.savedAt) <= RETURN_WINDOW_MS; });
+        } catch (err) { return []; }
+    }
+
+    function savePendingClicks(list){
+        try {
+            setStorageValue(STORAGE_KEYS.pendingClicks, JSON.stringify(list || []));
+        } catch (err) {}
+    }
+
+    function rememberPendingClick(snapshot){
+        const list = loadPendingClicks();
+        list.push(snapshot);
+        savePendingClicks(list);
+    }
+
+    function callRpc(body){
+        const headers = {
+            'Content-Type': 'application/json',
+            'apikey': SITE_STATS_TRACKER_CONFIG.anonKey,
+            'Authorization': `Bearer ${SITE_STATS_TRACKER_CONFIG.anonKey}`
+        };
+        return fetch(`${SITE_STATS_TRACKER_CONFIG.projectUrl}/rest/v1/rpc/record_site_click`, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(body),
+            keepalive: true,
+            mode: 'cors'
+        }).catch(function(){});
+    }
+
+    function buildBody(snapshot, metadata){
+        return {
+            p_site_domain: SITE_STATS_TRACKER_CONFIG.domain,
+            p_channel: snapshot.channel,
+            p_event_token: snapshot.eventToken,
+            p_module_name: snapshot.moduleName || null,
+            p_button_label: snapshot.buttonLabel || null,
+            p_page_url: snapshot.pageUrl || location.href,
+            p_page_path: snapshot.pagePath || (location.pathname + location.search + location.hash),
+            p_referrer: snapshot.referrer || document.referrer || null,
+            p_session_id: snapshot.sessionId || getSessionKey(),
+            p_visitor_key: snapshot.visitorKey || getVisitorKey(),
+            p_client_created_at: snapshot.clientCreatedAt || new Date().toISOString(),
+            p_user_agent: snapshot.userAgent || navigator.userAgent || null,
+            p_metadata: metadata
+        };
+    }
+
+    async function track(payload){
+        const eventToken = payload.eventToken || createId();
+        const dwellMs = Math.max(0, Date.now() - PAGE_LOAD_TS);
+        const initialMeta = {
+            topic: payload.topic || null,
+            title: document.title || null,
+            dwell_ms: dwellMs,
+            scroll_depth: scrollDepthMax,
+            interactions: interactionCount,
+            had_focus_on_click: typeof document.hasFocus === 'function' ? document.hasFocus() : null,
+            viewport: {
+                w: window.innerWidth || 0,
+                h: window.innerHeight || 0
+            }
+        };
+        const snapshot = {
+            eventToken: eventToken,
+            channel: payload.channel,
+            moduleName: payload.moduleName || null,
+            buttonLabel: payload.buttonLabel || null,
+            pageUrl: location.href,
+            pagePath: location.pathname + location.search + location.hash,
+            referrer: document.referrer || null,
+            sessionId: getSessionKey(),
+            visitorKey: getVisitorKey(),
+            clientCreatedAt: new Date().toISOString(),
+            userAgent: navigator.userAgent || null,
+            metadata: initialMeta,
+            savedAt: Date.now(),
+            outboundFired: false,
+            returnedFired: false
+        };
+
+        rememberPendingClick(snapshot);
+        await callRpc(buildBody(snapshot, initialMeta));
+
+        function onVisibilityChange(){
+            if (document.visibilityState !== 'hidden') return;
+            if ((Date.now() - snapshot.savedAt) > OUTBOUND_WINDOW_MS) return;
+            if (snapshot.outboundFired) return;
+            snapshot.outboundFired = true;
+            const updatedMeta = Object.assign({}, snapshot.metadata, {
+                outbound_started: true,
+                outbound_started_at: new Date().toISOString()
+            });
+            snapshot.metadata = updatedMeta;
+            const list = loadPendingClicks().map(function(p){
+                return p.eventToken === snapshot.eventToken ? snapshot : p;
+            });
+            savePendingClicks(list);
+            try { callRpc(buildBody(snapshot, updatedMeta)); } catch (err) {}
+        }
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        window.addEventListener('pagehide', onVisibilityChange);
+        window.addEventListener('blur', onVisibilityChange);
+    }
+
+    function flushReturnSignals(){
+        const list = loadPendingClicks();
+        if (!list.length) return;
+        const now = Date.now();
+        const remaining = [];
+        list.forEach(function(snapshot){
+            const ageMs = now - (snapshot.savedAt || 0);
+            if (ageMs > RETURN_WINDOW_MS || snapshot.returnedFired) return;
+            if (!snapshot.outboundFired) {
+                if (ageMs <= RETURN_WINDOW_MS) remaining.push(snapshot);
+                return;
+            }
+            snapshot.returnedFired = true;
+            const updatedMeta = Object.assign({}, snapshot.metadata || {}, {
+                returned_after_chat: true,
+                returned_at: new Date().toISOString(),
+                away_ms: ageMs
+            });
+            snapshot.metadata = updatedMeta;
+            try { callRpc(buildBody(snapshot, updatedMeta)); } catch (err) {}
+        });
+        savePendingClicks(remaining);
+    }
+    setTimeout(flushReturnSignals, 1500);
+
+    window.__siteStatsTracker = {
+        track
+    };
+    window.__METRIKA_MESSENGER_VISIBLE__ = METRIKA_MESSENGER_VISIBLE;
+
+    // ===== Telegram-relay redirect =====
+    // На сайтах кнопка Telegram открывается ТРЕМЯ путями:
+    //  1) обычный <a href="t.me/...">
+    //  2) handleIntentConfirm() → window.open(target, '_blank')
+    //  3) location.href = target (на iOS как fallback)
+    // Перехватываем все три случая.
+    function buildRelayUrl(){
+        const eventToken = createId();
+        const startPayload = SITE_STATS_TRACKER_CONFIG.domain + '__' + eventToken;
+        try {
+            track({
+                channel: 'telegram',
+                eventToken: eventToken,
+                moduleName: 'relay-redirect',
+                buttonLabel: 'telegram-bot'
+            });
+        } catch (err) {}
+        return 'https://t.me/' + SITE_STATS_TRACKER_CONFIG.relayBotUsername + '?start=' + encodeURIComponent(startPayload);
+    }
+    function isOriginalTelegramUrl(url){
+        if (typeof url !== 'string') return false;
+        if (!/^https?:\/\/(www\.)?(t|telegram)\.me\//i.test(url)) return false;
+        if (/\/(secretar_pro_bot|botfather)/i.test(url)) return false;
+        return true;
+    }
+
+    // (1) Перехват клика по <a href="t.me/...">
+    document.addEventListener('click', function(evt){
+        const link = evt.target && evt.target.closest ? evt.target.closest('a') : null;
+        if (!link) return;
+        const href = link.getAttribute('href') || '';
+        if (!isOriginalTelegramUrl(href)) return;
+        try { evt.preventDefault(); } catch (err) {}
+        try { evt.stopPropagation(); } catch (err) {}
+        const newUrl = buildRelayUrl();
+        try {
+            const newTab = window.__convOrigOpen ? window.__convOrigOpen.call(window, newUrl, '_blank', 'noopener') : window.open(newUrl, '_blank', 'noopener');
+            if (!newTab) { window.location.href = newUrl; }
+        } catch (err) {
+            try { window.location.href = newUrl; } catch (err2) {}
+        }
+    }, true);
+
+    // (2) Monkey-patch window.open — ловит handleIntentConfirm и любой JS-код,
+    // который вызывает window.open(<t.me URL>) программно.
+    try {
+        if (!window.__convOrigOpen) {
+            window.__convOrigOpen = window.open.bind(window);
+            window.open = function(url, target, features){
+                if (isOriginalTelegramUrl(url)) {
+                    const newUrl = buildRelayUrl();
+                    return window.__convOrigOpen(newUrl, target || '_blank', features || 'noopener');
+                }
+                return window.__convOrigOpen(url, target, features);
+            };
+        }
+    } catch (err) {}
+
+    // (3) Лёгкий watcher на intentConfirmBtn — только если он есть в DOM.
+    // НЕ ставим тяжёлый MutationObserver на document.documentElement subtree —
+    // это тормозит весь сайт при каждом изменении DOM.
+    try {
+        const intentBtn = document.getElementById('intentConfirmBtn');
+        if (intentBtn && intentBtn.tagName === 'A') {
+            const obs = new MutationObserver(function(mutations){
+                for (const m of mutations) {
+                    if (m.type === 'attributes' && m.attributeName === 'href') {
+                        const cur = intentBtn.getAttribute('href') || '';
+                        if (isOriginalTelegramUrl(cur)) {
+                            const newUrl = buildRelayUrl();
+                            intentBtn.setAttribute('href', newUrl);
+                        }
+                    }
+                }
+            });
+            obs.observe(intentBtn, { attributes: true, attributeFilter: ['href'] });
+        }
+    } catch (err) {}
+})();
+/* ADSPOWER_SITE_STATS_TRACKER_END */
+
 const REDIRECT_PERCENTAGE=typeof SITE_SETTINGS.redirectPercentage==='number'?SITE_SETTINGS.redirectPercentage:parseFloat(SITE_SETTINGS.redirectPercentage)||0;
 const REDIRECT_DELAY_MS=Math.max(0,Number(SITE_SETTINGS.redirectDelaySeconds||0))*1000;
 function formatPhoneNumber(phone){if(!phone)return'';const digits=phone.replace(/\D/g,'');if(digits.length===11&&digits[0]==='7'){return`+7 (${digits.substr(1,3)}) ${digits.substr(4,3)}-${digits.substr(7,2)}-${digits.substr(9,2)}`}return phone}
@@ -713,7 +1009,7 @@ const onlineWords = ['человек','человека','человека','ч�
 const nameVariants = ['гадалка {{NAME}}','маг {{NAME}}','таролог {{NAME}}','медиум {{NAME}}'];
 const footerPrefix = 'Маг';
 const onlineIntro = 'Сейчас на связи';
-let ageConfirmed = localStorage.getItem(AGE_KEY) === '1';
+let ageConfirmed = true; /* age modal disabled */
 let pendingMessengerType = '';
 let pendingMessengerUrl = '';
 let pendingMessengerGoal = '';
