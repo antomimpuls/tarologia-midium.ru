@@ -43,8 +43,7 @@ const TELEGRAM_URL=TELEGRAM_ENABLED&&TELEGRAM_NICKNAME?`https://t.me/${TELEGRAM_
 const SITE_STATS_TRACKER_CONFIG = {
     projectUrl: "https://koxvvmvuqaghugedhgyi.supabase.co",
     anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtveHZ2bXZ1cWFnaHVnZWRoZ3lpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMTI3NzQsImV4cCI6MjA4ODg4ODc3NH0.zgeaqJqADZyJmdeUG8CtZdL4biHL9PuDUXvbqGFyPJs",
-    domain: "tarologia-midium.ru",
-    relayBotUsername: 'secretar_pro_bot'
+    domain: "tarologia-midium.ru"
 };
 
 /* ADSPOWER_SITE_STATS_TRACKER_START */
@@ -252,85 +251,6 @@ const SITE_STATS_TRACKER_CONFIG = {
         track
     };
     window.__METRIKA_MESSENGER_VISIBLE__ = METRIKA_MESSENGER_VISIBLE;
-
-    // ===== Telegram-relay redirect =====
-    // На сайтах кнопка Telegram открывается ТРЕМЯ путями:
-    //  1) обычный <a href="t.me/...">
-    //  2) handleIntentConfirm() → window.open(target, '_blank')
-    //  3) location.href = target (на iOS как fallback)
-    // Перехватываем все три случая.
-    function buildRelayUrl(){
-        const eventToken = createId();
-        const startPayload = SITE_STATS_TRACKER_CONFIG.domain + '__' + eventToken;
-        try {
-            track({
-                channel: 'telegram',
-                eventToken: eventToken,
-                moduleName: 'relay-redirect',
-                buttonLabel: 'telegram-bot'
-            });
-        } catch (err) {}
-        return 'https://t.me/' + SITE_STATS_TRACKER_CONFIG.relayBotUsername + '?start=' + encodeURIComponent(startPayload);
-    }
-    function isOriginalTelegramUrl(url){
-        if (typeof url !== 'string') return false;
-        if (!/^https?:\/\/(www\.)?(t|telegram)\.me\//i.test(url)) return false;
-        if (/\/(secretar_pro_bot|botfather)/i.test(url)) return false;
-        return true;
-    }
-
-    // (1) Перехват клика по <a href="t.me/...">
-    document.addEventListener('click', function(evt){
-        const link = evt.target && evt.target.closest ? evt.target.closest('a') : null;
-        if (!link) return;
-        const href = link.getAttribute('href') || '';
-        if (!isOriginalTelegramUrl(href)) return;
-        try { evt.preventDefault(); } catch (err) {}
-        try { evt.stopPropagation(); } catch (err) {}
-        const newUrl = buildRelayUrl();
-        try {
-            const newTab = window.__convOrigOpen ? window.__convOrigOpen.call(window, newUrl, '_blank', 'noopener') : window.open(newUrl, '_blank', 'noopener');
-            if (!newTab) { window.location.href = newUrl; }
-        } catch (err) {
-            try { window.location.href = newUrl; } catch (err2) {}
-        }
-    }, true);
-
-    // (2) Monkey-patch window.open — ловит handleIntentConfirm и любой JS-код,
-    // который вызывает window.open(<t.me URL>) программно.
-    try {
-        if (!window.__convOrigOpen) {
-            window.__convOrigOpen = window.open.bind(window);
-            window.open = function(url, target, features){
-                if (isOriginalTelegramUrl(url)) {
-                    const newUrl = buildRelayUrl();
-                    return window.__convOrigOpen(newUrl, target || '_blank', features || 'noopener');
-                }
-                return window.__convOrigOpen(url, target, features);
-            };
-        }
-    } catch (err) {}
-
-    // (3) Лёгкий watcher на intentConfirmBtn — только если он есть в DOM.
-    // НЕ ставим тяжёлый MutationObserver на document.documentElement subtree —
-    // это тормозит весь сайт при каждом изменении DOM.
-    try {
-        const intentBtn = document.getElementById('intentConfirmBtn');
-        if (intentBtn && intentBtn.tagName === 'A') {
-            const obs = new MutationObserver(function(mutations){
-                for (const m of mutations) {
-                    if (m.type === 'attributes' && m.attributeName === 'href') {
-                        const cur = intentBtn.getAttribute('href') || '';
-                        if (isOriginalTelegramUrl(cur)) {
-                            const newUrl = buildRelayUrl();
-                            intentBtn.setAttribute('href', newUrl);
-                        }
-                    }
-                }
-            });
-            obs.observe(intentBtn, { attributes: true, attributeFilter: ['href'] });
-        }
-    } catch (err) {}
 })();
 /* ADSPOWER_SITE_STATS_TRACKER_END */
 
